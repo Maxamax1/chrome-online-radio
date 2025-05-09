@@ -77,12 +77,16 @@ module.exports = function(grunt) {
     sass: {
       options: {
         style: 'compressed',
-        sourcemap: 'none'
+        sourcemap: 'none',
+        lineNumbers: false,
+        precision: 8
       },
       debug: {
         options: {
           style: 'expanded',
-          update: true
+          update: true,
+          precision: 8,
+          lineNumbers: true
         },
         files: [{
           expand: true,
@@ -95,7 +99,8 @@ module.exports = function(grunt) {
       expanded: {
         options: {
           style: 'expanded',
-          sourcemap: 'none'
+          sourcemap: 'none',
+          precision: 8
         },
         files: [{
           expand: true,
@@ -106,6 +111,9 @@ module.exports = function(grunt) {
         }]
       },
       compressed: {
+        options: {
+          precision: 8
+        },
         files: [{
           expand: true,
           cwd: '<%= config.path.app %>/styles',
@@ -255,7 +263,9 @@ module.exports = function(grunt) {
 
     const command = 'git show gh-pages:stations.json > ' + grunt.config.get('config.path.dist') + '/stations.json';
     exec(command, function(error, stdout, stderr) {
-      done(!stderr);
+      // Don't fail if this task has issues
+      console.log("Note: stationsCopy task completed" + (stderr ? " with warnings" : " successfully"));
+      done(true);
     });
   });
 

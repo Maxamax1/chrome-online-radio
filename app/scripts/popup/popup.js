@@ -27,6 +27,13 @@ const $footer = document.getElementById('footer');
 const $search = document.getElementById('search');
 
 /**
+ * Metadata update interval
+ * @type {number|null}
+ * @private
+ */
+let _metadataInterval = null;
+
+/**
  * Renders adding station to favorites.
  * @param {string} name
  * @private
@@ -236,17 +243,19 @@ function setVolume(volume, setInputValue, renderOnly) {
     $mute.style.display = 'block';
     $unmute.style.display = 'none';
 
-    volume = volume < 0 ? 0 : Math.min(volume, 100);
+    // Clamp volume to 0-100 for the slider
+    volume = Math.max(0, Math.min(volume, 100));
 
-    if (!volume) {
+    if (volume === 0) {
         $mute.style.display = 'none';
         $unmute.style.display = 'block';
     }
     if (setInputValue) {
-        $player.querySelector('.volume > input').value = volume;
+        $player.querySelector('.volume > input').value = volume * 15;
     }
     if (!renderOnly) {
-        sendMessageToOffscreen('volume', String(volume));
+        // Scale to 0-20 for the backend
+        sendMessageToOffscreen('volume', String(volume / 15));
     }
 }
 
@@ -255,20 +264,50 @@ function setVolume(volume, setInputValue, renderOnly) {
  * @private
  */
 async function renderStationsList() {
-    const stations = await sendMessageToBackground('getStations');
-    const favorites = await sendMessageToBackground('getFavorites');
+    try {
+        const [stations, favorites] = await Promise.all([
+            sendMessageToBackground('getStations').catch(error => {
+                console.error('Error getting stations:', error);
+                return {};
+            }),
+            sendMessageToBackground('getFavorites').catch(error => {
+                console.error('Error getting favorites:', error);
+                return [];
+            })
+        ]);
 
-    for (let i = 0, l = favorites.length; i < l; i++) {
-        const name = favorites[i];
-        if (stations.hasOwnProperty(name) && !stations[name].isHidden) {
-            $favorites.prepend(renderStation(name, stations[name].title, stations[name].image, true));
+        if (!stations || Object.keys(stations).length === 0) {
+            console.warn('No stations received or empty stations object');
+            return;
         }
-    }
 
-    for (let n in stations) {
-        if (stations.hasOwnProperty(n) && favorites.indexOf(n) < 0 && !stations[n].isHidden) {
-            $stations.append(renderStation(stations[n].name, stations[n].title, stations[n].image, false));
+        // Clear existing stations if re-rendering
+        if ($favorites.children.length > 0) {
+            $favorites.innerHTML = '';
         }
+        if ($stations.children.length > 0) {
+            $stations.innerHTML = '';
+        }
+
+        // Render favorites first
+        for (let i = 0, l = favorites.length; i < l; i++) {
+            const name = favorites[i];
+            if (stations.hasOwnProperty(name) && !stations[name].isHidden) {
+                $favorites.prepend(renderStation(name, stations[name].title, stations[name].image, true));
+            }
+        }
+
+        // Render other stations
+        for (let n in stations) {
+            if (stations.hasOwnProperty(n) && favorites.indexOf(n) < 0 && !stations[n].isHidden) {
+                $stations.append(renderStation(stations[n].name, stations[n].title, stations[n].image, false));
+            }
+        }
+
+        // Initialize event handlers for the new station elements
+        initEvents();
+    } catch (error) {
+        console.error('Error rendering stations list:', error);
     }
 }
 
@@ -319,10 +358,10 @@ function initEvents() {
         renderDislike($player.dataset.name);
     });
 
-    $player.querySelector('.volume > input').addEventListener('change', (e) => {
+    $player.querySelector('.volume > input').addEventListener('input', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        setVolume(e.target.value);
+        setVolume(Number(e.target.value));
     });
 
     $player.querySelector('.icon-mute').addEventListener('click', (e) => {
@@ -339,8 +378,10 @@ function initEvents() {
 
     $player.addEventListener('mousewheel', async (e) => {
         e.preventDefault();
-        const volume = await sendMessageToBackground('getVolume');
-        const step = 5;
+        // Get current volume (0-20), scale to 0-100
+        const backendVolume = await sendMessageToBackground('getVolume');
+        const volume = backendVolume * 15;
+        const step = 1;
         const delta = e.wheelDelta;
 
         if (delta > 0 && volume < 100) {
@@ -396,6 +437,123 @@ function initEvents() {
 }
 
 /**
+ * Updates the now playing display with current metadata
+ */
+async function updateNowPlaying() {
+    const $nowPlayingContainer = document.querySelector('#now-playing');
+    const $nowPlayingContent = document.querySelector('.now-playing-content');
+    const $nowPlayingText = document.querySelector('.now-playing-text');
+    
+    if (!$player.classList.contains('playing')) {
+        console.log('Player not playing, hiding now playing display');
+        $nowPlayingContainer.style.display = 'none';
+        return;
+    }
+    
+    console.log('Player is playing, showing now playing display');
+    $nowPlayingContainer.style.display = 'block';
+    
+    try {
+        console.log('Requesting metadata from offscreen page...');
+        const metadata = await sendMessageToOffscreen('getMetadata').catch(error => {
+            console.error('Error getting metadata:', error);
+            return null;
+        });
+        
+        if (!metadata) {
+            console.warn('Failed to get metadata, showing default "Now Playing" text');
+            $nowPlayingText.textContent = translate('now_playing');
+            $nowPlayingContent.classList.remove('scrolling');
+            return;
+        }
+        
+        console.log('Received raw metadata for now playing display:', metadata);
+        
+        if (metadata && metadata.StreamTitle && metadata.StreamTitle.trim() !== '') {
+            const songTitle = metadata.StreamTitle.trim();
+            console.log('Valid metadata found, setting now playing text to:', songTitle);
+            $nowPlayingText.textContent = songTitle;
+            
+            // Check if text needs scrolling (is wider than container)
+            setTimeout(() => {
+                const containerWidth = $nowPlayingContainer.offsetWidth;
+                const textWidth = $nowPlayingText.offsetWidth + 40; // Add some padding
+                
+                console.log('Now playing text dimensions - Container width:', containerWidth, 'Text width:', textWidth);
+                if (textWidth > containerWidth) {
+                    console.log('Text is wider than container, enabling scrolling');
+                    $nowPlayingContent.classList.add('scrolling');
+                } else {
+                    console.log('Text fits in container, disabling scrolling');
+                    $nowPlayingContent.classList.remove('scrolling');
+                }
+            }, 100); // Small delay to ensure text is rendered
+        } else {
+            console.log('No valid metadata found, showing default "Now Playing" text');
+            $nowPlayingText.textContent = translate('now_playing');
+            $nowPlayingContent.classList.remove('scrolling');
+        }
+    } catch (error) {
+        console.error('Error updating now playing:', error);
+        $nowPlayingText.textContent = translate('now_playing');
+        $nowPlayingContent.classList.remove('scrolling');
+    }
+}
+
+/**
+ * Updates the player's metadata display
+ */
+async function updateMetadata() {
+    if (!$player.classList.contains('playing')) {
+        console.log('Player not playing, skipping metadata update');
+        return;
+    }
+
+    console.log('Updating player metadata display...');
+    try {
+        const metadata = await sendMessageToOffscreen('getMetadata').catch(error => {
+            console.error('Error getting metadata:', error);
+            return null;
+        });
+        
+        if (!metadata) {
+            console.warn('Failed to get metadata for player display');
+            return;
+        }
+        
+        console.log('Received metadata for player display:', metadata);
+        
+        if (metadata && metadata.StreamTitle && metadata.StreamTitle.trim() !== '') {
+            console.log('Valid StreamTitle found:', metadata.StreamTitle);
+            
+            // Check if we already have a metadata display element
+            let $metadata = $player.querySelector('.metadata');
+            
+            if (!$metadata) {
+                console.log('Creating new metadata display element');
+                $metadata = document.createElement('div');
+                $metadata.className = 'metadata';
+                // Insert after title
+                const $title = $player.querySelector('.title');
+                $title.insertAdjacentElement('afterend', $metadata);
+            } else {
+                console.log('Updating existing metadata display element');
+            }
+            
+            $metadata.textContent = metadata.StreamTitle;
+            console.log('Metadata element text set to:', metadata.StreamTitle);
+            
+            // Update the now playing display separately here
+            updateNowPlaying();
+        } else {
+            console.warn('No valid metadata found for player display');
+        }
+    } catch (error) {
+        console.error('Error updating metadata:', error);
+    }
+}
+
+/**
  * Set player state.
  * @param {string=} state
  */
@@ -448,6 +606,9 @@ async function setPlayerState(state) {
 
             $description.appendChild($button);
         });
+        
+        // Initialize the now playing section to hidden
+        document.querySelector('#now-playing').style.display = 'none';
     };
 
     const error = () => {
@@ -458,11 +619,37 @@ async function setPlayerState(state) {
     const stop = () => {
         document.querySelector('.active')?.classList.remove('active');
         $player.classList.remove('buffering', 'playing', 'error');
+        
+        // Clear metadata display
+        const $metadata = $player.querySelector('.metadata');
+        if ($metadata) {
+            $metadata.remove();
+        }
+        
+        // Hide now playing
+        document.querySelector('#now-playing').style.display = 'none';
+        
+        // Clear metadata update interval
+        if (_metadataInterval) {
+            clearInterval(_metadataInterval);
+            _metadataInterval = null;
+        }
     };
 
     const play = function() {
         $player.classList.remove('buffering', 'error');
         $player.classList.add('playing');
+        
+        // Set up metadata update interval
+        updateMetadata();
+        updateNowPlaying();
+        
+        if (!_metadataInterval) {
+            _metadataInterval = setInterval(() => {
+                updateMetadata();
+                updateNowPlaying();
+            }, 5000);
+        }
     };
 
     if (!$player.classList.contains('ready') && state !== 'buffering') {
@@ -512,7 +699,6 @@ chrome.runtime.onMessage.addListener((message) => {
 (async () => {
     await renderStationsList();
     translateAll();
-    initEvents();
     setVolume(await sendMessageToBackground('getVolume'), true, true);
     renderEqualizer();
     await setPlayerState();

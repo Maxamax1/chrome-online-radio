@@ -168,5 +168,8 @@
   },
   "changelog_2_0_7": {
     "message": "<b>2.0.8</b><br> — Intégration avec http://101.ru et http://tunein.com"
+  },
+  "toggle_theme": {
+    "message": "Basculer le mode sombre/clair"
   }
 }

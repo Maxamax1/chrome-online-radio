@@ -36,6 +36,8 @@ const _coreStations = {};
  */
 const _userStations = {};
 
+let _initPromise = null;
+
 async function _save(name, value) {
     return chrome.storage.local.set({[name.toString()]: value});
 }
@@ -368,21 +370,26 @@ export async function init() {
     if (Object.keys(_coreStations).length > 0) {
         return;
     }
-
-    _favorites = await _get('_favorites', []);
-    if (typeof _favorites !== 'object') {
-        _favorites = [];
+    if (_initPromise) {
+        return _initPromise;
     }
-    _last = await _get('_last', Object.keys(_coreStations)[0]);
-    _hidden = await _get('_hidden', {});
-    if (typeof _hidden !== 'object') {
-        _hidden = {};
-    }
-    _volume = await _get('_volume', {current: 80, last: 80});
-    if (typeof _volume !== 'object') {
-        _volume = {};
-    }
-
-    await _loadStations();
-    await _setCorsRules();
+    _initPromise = (async () => {
+        _favorites = await _get('_favorites', []);
+        if (typeof _favorites !== 'object') {
+            _favorites = [];
+        }
+        _last = await _get('_last', Object.keys(_coreStations)[0]);
+        _hidden = await _get('_hidden', {});
+        if (typeof _hidden !== 'object') {
+            _hidden = {};
+        }
+        _volume = await _get('_volume', {current: 80, last: 80});
+        if (typeof _volume !== 'object') {
+            _volume = {};
+        }
+        await _loadStations();
+        await _setCorsRules();
+    })();
+    await _initPromise;
+    _initPromise = null;
 }

@@ -168,5 +168,11 @@
   },
   "changelog_2_0_7": {
     "message": "<b>2.0.8</b><br> — Integration with http://101.ru and http://tunein.com"
+  },
+  "now_playing": {
+    "message": "Now Playing"
+  },
+  "toggle_theme": {
+    "message": "Toggle dark/light mode"
   }
 }

@@ -1,2 +1,19 @@
 ﻿<!DOCTYPE html>
-<script src="scripts/offscreen/offscreen.js" type="module"></script>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Offscreen Document</title>
+    <!-- Load Icecast player and its dependencies - use absolute path to ensure it works -->
+    <script src="/scripts/background/icecast-metadata-player-1.17.9.main.min.js"></script>
+    <style>
+        /* Hide the body as this is just a background page */
+        body {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <!-- This is an offscreen document used for audio playback with Icecast Metadata Player -->
+    <script src="scripts/offscreen/offscreen.js" type="module"></script>
+</body>
+</html>
